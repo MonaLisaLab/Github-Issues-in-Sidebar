@@ -15,22 +15,39 @@
     ],
     "main": "./dist/extension.js",
     "contributes": {
-        "viewsContainers": {
-            "activitybar": [
+        "views": {
+            "explorer": [
                 {
-                    "id": "github-issues-sidebar-container",
-                    "title": "GitHub Issues",
-                    "icon": "resources/icon.svg"
+                    "id": "githubIssues",
+                    "name": "GitHub Issues"
                 }
             ]
         },
-        "views": {
-            "github-issues-sidebar-container": [
-                {
-                    "id": "githubIssues",
-                    "name": "Issues"
+        "commands": [
+            {
+                "command": "githubIssues.setToken",
+                "title": "Set GitHub Personal Access Token"
+            }
+        ],
+        "configuration": {
+            "title": "GitHub Issues",
+            "properties": {
+                "githubIssues.authToken": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Your personal access token for the GitHub API."
+                },
+                "githubIssues.repoOwner": {
+                    "type": "string",
+                    "default": "microsoft",
+                    "description": "The owner of the repository."
+                },
+                "githubIssues.repoName": {
+                    "type": "string",
+                    "default": "vscode",
+                    "description": "The name of the repository."
                 }
-            ]
+            }
         }
     },
     "scripts": {
