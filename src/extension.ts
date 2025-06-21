@@ -1,32 +1,33 @@
 import * as vscode from 'vscode';
 import { Octokit } from '@octokit/rest';
 
-// アイテムの種類を管理しやすくするための型だよ
-type ItemType = 'issue' | 'subtask' | 'info';
+// Octokitから返ってくるリポジトリの型を定義しておくことで、エラーを防ぐよ
+interface OctokitRepo {
+    full_name: string;
+    private: boolean;
+}
 
 class IssueItem extends vscode.TreeItem {
-    // イシューやサブタスクの情報を全部持っておくためのプロパティを追加したよ
+    // イシューの識別に必要な情報を全部持っておくためのプロパティだよ
     public owner?: string;
     public repo?: string;
     public issueNumber?: number;
-    public subtasks: IssueItem[] = [];
 
     constructor(
         public readonly label: string,
-        public readonly itemType: ItemType,
-        public collapsibleState: vscode.TreeItemCollapsibleState,
-        // いろんな情報を渡せるように、コンストラクタをちょっと変更したよ
+        // サブイシューの概念をなくして、シンプルにしたよ
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly command?: vscode.Command,
         public readonly issueUrl?: string,
         issueDetails?: { owner: string; repo: string; issueNumber: number }
     ) {
         super(label, collapsibleState);
         
-        // `contextValue` を設定することで、package.jsonの`when`句で出し分けるメニューを制御できるんだ
-        this.contextValue = itemType;
+        // このアイテムが「イシュー」であることを示すために、contextValueを設定するよ
+        // これでpackage.jsonの`when`句が正しく動くんだ
+        this.contextValue = 'issue';
 
         if (issueUrl) {
-            // デフォルトのコマンドは、ブラウザでイシューを開くコマンドだよ
             this.command = {
                 command: 'vscode.open',
                 title: 'Open Issue',
@@ -40,10 +41,8 @@ class IssueItem extends vscode.TreeItem {
             this.issueNumber = issueDetails.issueNumber;
         }
 
-        // アイテムの種類によってアイコンを変えるよ
-        if (itemType === 'issue') {
-            this.iconPath = new vscode.ThemeIcon('issues');
-        }
+        // イシューにはアイコンをつけるよ
+        this.iconPath = new vscode.ThemeIcon('issues');
     }
 }
 
@@ -86,7 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
         
         const octokit = new Octokit({ auth: authToken });
 
-        let repos: any[] = [];
+        let repos: OctokitRepo[] = [];
         try {
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
@@ -94,10 +93,11 @@ export function activate(context: vscode.ExtensionContext) {
                 cancellable: false
             }, async () => {
                 // 認証ユーザーがアクセスできるすべてのリポジトリを取得する
-                repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
-                    type: 'all',
+                // 型エラーを回避するために、エンドポイントを文字列で直接指定するよ
+                repos = await octokit.paginate<OctokitRepo>('GET /user/repos', {
+                        type: 'all',
                     sort: 'full_name',
-                });
+                        });
             });
 
         } catch (e: any) {
@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!selectedRepoItem) {
             return;
         }
-        
+
         const [owner, name] = selectedRepoItem.label.split('/');
 
         await config.update('repoOwner', owner, vscode.ConfigurationTarget.Global);
@@ -182,7 +182,8 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`✅ Successfully authenticated as: ${user.login}`);
 
             outputChannel.appendLine("\nFetching accessible repositories...");
-            const repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+            // 型エラーを回避するために、エンドポイントを文字列で直接指定するよ
+            const repos = await octokit.paginate<OctokitRepo>('GET /user/repos', {
                 type: 'all',
                 per_page: 100,
             });
@@ -225,7 +226,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const closeIssueCommand = vscode.commands.registerCommand('githubIssues.closeIssue', async (issueItem: IssueItem) => {
-        if (!issueItem || issueItem.itemType !== 'issue' || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
+        if (!issueItem || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
             vscode.window.showErrorMessage('Cannot close issue. Invalid item selected.');
             return;
         }
@@ -250,6 +251,7 @@ export function activate(context: vscode.ExtensionContext) {
                 state: 'closed'
             });
             vscode.window.showInformationMessage(`Successfully closed issue #${issueItem.issueNumber}.`);
+            // イシューをクローズしたら、ビューをリフレッシュするよ！
             issueProvider.refresh();
         } catch (e: any) {
             vscode.window.showErrorMessage(`Failed to close issue: ${e.message}`);
@@ -257,7 +259,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const addCommentCommand = vscode.commands.registerCommand('githubIssues.addComment', async (issueItem: IssueItem) => {
-        if (!issueItem || issueItem.itemType !== 'issue' || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
+        if (!issueItem || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
             vscode.window.showErrorMessage('Cannot comment on issue. Invalid item selected.');
             return;
         }
@@ -310,9 +312,9 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
     }
 
     async getChildren(element?: IssueItem): Promise<IssueItem[]> {
-        // もし`element`があれば、それは親イシューってことだから、そのサブタスクを返すよ
+        // サブイシューのロジックはなくなったから、elementがあったら空の配列を返すよ
         if (element) {
-            return Promise.resolve(element.subtasks);
+            return Promise.resolve([]);
         }
 
         // `element`がなければ、一番上の階層のイシューを取得しにいくよ
@@ -324,7 +326,6 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
         if (!authToken) {
             const setTokenItem = new IssueItem(
                 'Set GitHub Token', 
-                'info',
                 vscode.TreeItemCollapsibleState.None,
                 {
                     command: 'githubIssues.setToken',
@@ -337,7 +338,6 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
         if (!repoOwner || !repoName) {
             const selectRepoItem = new IssueItem(
                 'Select Repository to show issues', 
-                'info',
                 vscode.TreeItemCollapsibleState.None,
                 {
                     command: 'githubIssues.selectRepository',
@@ -357,25 +357,18 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
             });
 
             if (issues.data.length === 0) {
-                return [new IssueItem('No open issues found.', 'info', vscode.TreeItemCollapsibleState.None)];
+                return [new IssueItem('No open issues found.', vscode.TreeItemCollapsibleState.None)];
             }
 
             // APIから受け取ったイシューを、画面に表示する`IssueItem`に変換するよ
             return issues.data.map(issue => {
-                // イシューの本文（body）からサブタスクを抜き出すんだ
-                const subtasks = this.parseSubtasks(issue.body || '');
-
                 const issueItem = new IssueItem(
                     `#${issue.number}: ${issue.title}`,
-                    'issue',
-                    // サブタスクがあれば、フォルダみたいに開けられるようにするよ
-                    subtasks.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                    vscode.TreeItemCollapsibleState.None, // イシューは常に閉じている状態にするよ
                     undefined,
                     issue.html_url,
                     { owner: repoOwner, repo: repoName, issueNumber: issue.number }
                 );
-                // 見つけたサブタスクを、親イシューの中に保存しておくんだ
-                issueItem.subtasks = subtasks;
                 issueItem.tooltip = `[${repoOwner}/${repoName}] #${issue.number}\n\n${issue.title}`;
                 
                 return issueItem;
@@ -386,7 +379,6 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
             if (error.status === 401) {
                  const setTokenItem = new IssueItem(
                     'Authentication failed. Set new Token?', 
-                    'info',
                     vscode.TreeItemCollapsibleState.None,
                     {
                         command: 'githubIssues.setToken',
@@ -396,29 +388,8 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
                 return [setTokenItem];
             }
             vscode.window.showErrorMessage('Failed to fetch issues from GitHub.');
-            return [new IssueItem('Error fetching issues. Check logs for details.', 'info', vscode.TreeItemCollapsibleState.None)];
+            return [new IssueItem('Error fetching issues. Check logs for details.', vscode.TreeItemCollapsibleState.None)];
         }
-    }
-
-    /**
-     * イシューの本文から、GitHubのタスクリスト（- [ ] や - [x]）を正規表現で探し出して、
-     * IssueItemの配列として返すヘルパー関数だよ。
-     */
-    private parseSubtasks(body: string): IssueItem[] {
-        const subtasks: IssueItem[] = [];
-        const taskRegex = /-\s\[( |x)\]\s(.*)/g;
-        let match;
-        while ((match = taskRegex.exec(body)) !== null) {
-            const isCompleted = match[1] === 'x';
-            const label = match[2].trim();
-            
-            const subtaskItem = new IssueItem(label, 'subtask', vscode.TreeItemCollapsibleState.None);
-            subtaskItem.iconPath = new vscode.ThemeIcon(isCompleted ? 'check' : 'circle-large-outline');
-            subtaskItem.description = isCompleted ? "Completed" : "";
-            
-            subtasks.push(subtaskItem);
-        }
-        return subtasks;
     }
 }
 
