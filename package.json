@@ -51,6 +51,12 @@
                     "when": "view == githubIssues",
                     "group": "navigation",
                     "icon": "$(refresh)"
+                },
+                {
+                    "command": "githubIssues.setToken",
+                    "when": "view == githubIssues",
+                    "group": "navigation",
+                    "icon": "$(key)"
                 }
             ]
         },
