@@ -19,7 +19,8 @@
             "explorer": [
                 {
                     "id": "githubIssues",
-                    "name": "GitHub Issues"
+                    "name": "GitHub Issues",
+                    "icon": "resources/icon.svg"
                 }
             ]
         },
@@ -27,8 +28,32 @@
             {
                 "command": "githubIssues.setToken",
                 "title": "Set GitHub Personal Access Token"
+            },
+            {
+                "command": "githubIssues.selectRepository",
+                "title": "Select Repository"
+            },
+            {
+                "command": "githubIssues.refresh",
+                "title": "Refresh"
             }
         ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "githubIssues.selectRepository",
+                    "when": "view == githubIssues",
+                    "group": "navigation",
+                    "icon": "$(pencil)"
+                },
+                {
+                    "command": "githubIssues.refresh",
+                    "when": "view == githubIssues",
+                    "group": "navigation",
+                    "icon": "$(refresh)"
+                }
+            ]
+        },
         "configuration": {
             "title": "GitHub Issues",
             "properties": {
@@ -39,12 +64,12 @@
                 },
                 "githubIssues.repoOwner": {
                     "type": "string",
-                    "default": "microsoft",
+                    "default": "",
                     "description": "The owner of the repository."
                 },
                 "githubIssues.repoName": {
                     "type": "string",
-                    "default": "vscode",
+                    "default": "",
                     "description": "The name of the repository."
                 }
             }
@@ -57,10 +82,11 @@
         "package": "webpack --mode production --devtool hidden-source-map"
     },
     "devDependencies": {
-        "@types/vscode": "^1.80.0",
         "@types/node": "18.x",
-        "typescript": "^5.3.3",
+        "@types/vscode": "^1.80.0",
         "ts-loader": "^9.5.1",
+        "typescript": "^5.3.3",
+        "vsce": "^2.15.0",
         "webpack": "^5.90.3",
         "webpack-cli": "^5.1.4"
     },
@@ -71,4 +97,4 @@
         "type": "git",
         "url": ""
     }
-} 
+}
