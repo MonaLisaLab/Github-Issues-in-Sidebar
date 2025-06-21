@@ -39,74 +39,145 @@ export function activate(context: vscode.ExtensionContext) {
         
         const octokit = new Octokit({ auth: authToken });
 
-        const repoOwner = await vscode.window.showInputBox({
-            prompt: 'Enter the repository owner (user or organization)',
-            value: config.get<string>('repoOwner') || '',
-            ignoreFocusOut: true,
-        });
-
-        if (!repoOwner) {
-            return;
-        }
-
-        let repos: { name: string; }[] = [];
+        let repos: any[] = [];
         try {
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: `Fetching repositories for ${repoOwner}...`,
+                title: `Fetching your accessible repositories...`,
                 cancellable: false
             }, async () => {
-                try {
-                    repos = await octokit.paginate(octokit.repos.listForUser, {
-                        username: repoOwner,
-                        type: 'all',
-                    });
-                } catch (error: any) {
-                    if (error.status === 404) {
-                        // User not found, try as organization
-                        repos = await octokit.paginate(octokit.repos.listForOrg, {
-                            org: repoOwner,
-                            type: 'all',
-                        });
-                    } else {
-                        throw error;
-                    }
-                }
+                // 認証ユーザーがアクセスできるすべてのリポジトリを取得する
+                repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+                    type: 'all',
+                    sort: 'full_name',
+                });
             });
 
         } catch (e: any) {
             console.error(e);
-            vscode.window.showErrorMessage(`Could not fetch repositories for ${repoOwner}. Please check if the owner exists and your token has the correct permissions.`);
+            let errorMessage = `Could not fetch repositories.`;
+            if (e.status === 401) {
+                errorMessage += `\nAuthentication failed. Please check if your token is correct and has 'repo' scope.`;
+                await vscode.commands.executeCommand('githubIssues.setToken');
+            } else {
+                errorMessage += `\nPlease check your token, network connection, and try again.`;
+            }
+            vscode.window.showErrorMessage(errorMessage, { modal: true });
             return;
         }
 
         if (repos.length === 0) {
-            vscode.window.showInformationMessage(`No repositories found for ${repoOwner}.`);
+            vscode.window.showInformationMessage(`No repositories found that you have access to.`);
             return;
         }
 
-        const repoNames = repos.map(repo => repo.name).sort((a, b) => a.localeCompare(b));
+        const repoItems = repos
+            .map(repo => ({
+                label: repo.full_name,
+                description: repo.private ? '🔒 Private' : '🌐 Public',
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label));
 
-        const repoName = await vscode.window.showQuickPick(repoNames, {
-            placeHolder: `Select a repository from ${repoOwner}`,
+        const selectedRepoItem = await vscode.window.showQuickPick(repoItems, {
+            placeHolder: `Select a repository to show issues`,
             ignoreFocusOut: true,
         });
 
-        if (!repoName) {
+        if (!selectedRepoItem) {
             return;
         }
+        
+        const [owner, name] = selectedRepoItem.label.split('/');
 
-        await config.update('repoOwner', repoOwner, vscode.ConfigurationTarget.Global);
-        await config.update('repoName', repoName, vscode.ConfigurationTarget.Global);
+        await config.update('repoOwner', owner, vscode.ConfigurationTarget.Global);
+        await config.update('repoName', name, vscode.ConfigurationTarget.Global);
 
-        vscode.window.showInformationMessage(`Repository changed to ${repoOwner}/${repoName} 🎉`);
+        vscode.window.showInformationMessage(`Repository changed to ${selectedRepoItem.label} 🎉`);
     });
 
     const refreshCommand = vscode.commands.registerCommand('githubIssues.refresh', () => {
         issueProvider.refresh();
     });
 
-    context.subscriptions.push(setTokenCommand, selectRepositoryCommand, refreshCommand);
+    const diagnoseCommand = vscode.commands.registerCommand('githubIssues.diagnose', async () => {
+        const outputChannel = vscode.window.createOutputChannel("GitHub Issues Diagnostics");
+        outputChannel.show(true);
+        outputChannel.appendLine("Starting GitHub Issues extension diagnostics...");
+
+        const config = vscode.workspace.getConfiguration('githubIssues');
+        const authToken = config.get<string>('authToken');
+
+        if (!authToken) {
+            outputChannel.appendLine("❌ ERROR: GitHub Personal Access Token is not set.");
+            vscode.window.showErrorMessage("GitHub Token not set. Please set it first using the 'Set GitHub Personal Access Token' command.");
+            return;
+        }
+        outputChannel.appendLine("✅ Token found in configuration.");
+
+        const octokit = new Octokit({ auth: authToken });
+
+        try {
+            outputChannel.appendLine("\nChecking API rate limit and token scopes...");
+            const rateLimitResponse = await octokit.rateLimit.get();
+            
+            const scopes = rateLimitResponse.headers['x-oauth-scopes'];
+            outputChannel.appendLine(`✅ Token Scopes: ${scopes}`);
+
+            if (!scopes || !scopes.split(',').map(s => s.trim()).includes('repo')) {
+                outputChannel.appendLine("❌ WARNING: Token does not appear to have the required 'repo' scope.");
+                vscode.window.showWarningMessage("Your GitHub token seems to be missing the 'repo' scope, which is required for private repositories.");
+            } else {
+                 outputChannel.appendLine("✅ Token has 'repo' scope.");
+            }
+
+            outputChannel.appendLine("\nFetching authenticated user info...");
+            const { data: user } = await octokit.users.getAuthenticated();
+            outputChannel.appendLine(`✅ Successfully authenticated as: ${user.login}`);
+
+            outputChannel.appendLine("\nFetching accessible repositories...");
+            const repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+                type: 'all',
+                per_page: 100,
+            });
+            outputChannel.appendLine(`✅ Found ${repos.length} accessible repositories.`);
+
+            if (repos.length > 0) {
+                const privateRepos = repos.filter(repo => repo.private).length;
+                const publicRepos = repos.length - privateRepos;
+                outputChannel.appendLine(`   - Public: ${publicRepos}, Private: ${privateRepos}`);
+                outputChannel.appendLine("\nFirst 10 repositories found:");
+                repos.slice(0, 10).forEach(repo => {
+                    outputChannel.appendLine(`- ${repo.full_name} (${repo.private ? '🔒 Private' : '🌐 Public'})`);
+                });
+            } else {
+                outputChannel.appendLine("❌ WARNING: No repositories were found. This is unexpected if you have access to any repositories.");
+            }
+            
+            outputChannel.appendLine("\n---");
+            outputChannel.appendLine("💡 Next Steps:");
+            outputChannel.appendLine("1. Check the 'Token Scopes' above. It MUST include 'repo'. If not, create a new token with the 'repo' scope.");
+            outputChannel.appendLine("2. If scopes are correct but you're missing private org repos, you may need to authorize the token for that org's SAML SSO.");
+            outputChannel.appendLine("   - Go to your Personal Access Tokens page on GitHub.");
+            outputChannel.appendLine("   - Find your token, and click the 'Configure SSO' or 'Enable SSO' button next to it.");
+            outputChannel.appendLine("   - Authorize it for the organization(s) you need to access.");
+            
+            vscode.window.showInformationMessage("Diagnostics finished. Check the 'GitHub Issues Diagnostics' output channel for details.");
+
+        } catch (error: any) {
+            outputChannel.appendLine(`\n❌ An error occurred during diagnostics:`);
+            outputChannel.appendLine(error.toString());
+            if (error.status) {
+                outputChannel.appendLine(`Status: ${error.status}`);
+            }
+            if(error.response?.headers) {
+                outputChannel.appendLine("Response Headers:");
+                outputChannel.appendLine(JSON.stringify(error.response.headers, null, 2));
+            }
+            vscode.window.showErrorMessage("An error occurred during diagnostics. Check the output channel for details.");
+        }
+    });
+
+    context.subscriptions.push(setTokenCommand, selectRepositoryCommand, refreshCommand, diagnoseCommand);
 
     // 設定が変更されたらビューをリフレッシュする
     vscode.workspace.onDidChangeConfiguration(event => {

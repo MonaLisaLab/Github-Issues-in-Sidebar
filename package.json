@@ -36,6 +36,10 @@
             {
                 "command": "githubIssues.refresh",
                 "title": "Refresh"
+            },
+            {
+                "command": "githubIssues.diagnose",
+                "title": "Run Connection Diagnostics"
             }
         ],
         "menus": {
