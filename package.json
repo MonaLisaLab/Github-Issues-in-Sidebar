@@ -44,6 +44,16 @@
                 "command": "githubIssues.diagnose",
                 "title": "Run Connection Diagnostics",
                 "icon": "$(beaker)"
+            },
+            {
+                "command": "githubIssues.closeIssue",
+                "title": "Close Issue",
+                "icon": "$(check)"
+            },
+            {
+                "command": "githubIssues.addComment",
+                "title": "Add Comment",
+                "icon": "$(comment)"
             }
         ],
         "menus": {
@@ -65,6 +75,23 @@
                 },
                 {
                     "command": "githubIssues.diagnose",
+                    "when": "view == githubIssues",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "githubIssues.addComment",
+                    "when": "view == githubIssues && viewItem == issue",
+                    "group": "modification@1"
+                },
+                {
+                    "command": "githubIssues.closeIssue",
+                    "when": "view == githubIssues && viewItem == issue",
+                    "group": "modification@2"
+                },
+                {
+                    "command": "githubIssues.refresh",
                     "when": "view == githubIssues",
                     "group": "navigation"
                 }

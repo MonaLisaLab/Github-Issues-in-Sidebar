@@ -1,6 +1,53 @@
 import * as vscode from 'vscode';
 import { Octokit } from '@octokit/rest';
 
+// アイテムの種類を管理しやすくするための型だよ
+type ItemType = 'issue' | 'subtask' | 'info';
+
+class IssueItem extends vscode.TreeItem {
+    // イシューやサブタスクの情報を全部持っておくためのプロパティを追加したよ
+    public owner?: string;
+    public repo?: string;
+    public issueNumber?: number;
+    public subtasks: IssueItem[] = [];
+
+    constructor(
+        public readonly label: string,
+        public readonly itemType: ItemType,
+        public collapsibleState: vscode.TreeItemCollapsibleState,
+        // いろんな情報を渡せるように、コンストラクタをちょっと変更したよ
+        public readonly command?: vscode.Command,
+        public readonly issueUrl?: string,
+        issueDetails?: { owner: string; repo: string; issueNumber: number }
+    ) {
+        super(label, collapsibleState);
+        
+        // `contextValue` を設定することで、package.jsonの`when`句で出し分けるメニューを制御できるんだ
+        this.contextValue = itemType;
+
+        if (issueUrl) {
+            // デフォルトのコマンドは、ブラウザでイシューを開くコマンドだよ
+            this.command = {
+                command: 'vscode.open',
+                title: 'Open Issue',
+                arguments: [vscode.Uri.parse(issueUrl)]
+            };
+        }
+        
+        if (issueDetails) {
+            this.owner = issueDetails.owner;
+            this.repo = issueDetails.repo;
+            this.issueNumber = issueDetails.issueNumber;
+        }
+
+        // アイテムの種類によってアイコンを変えるよ
+        if (itemType === 'issue') {
+            this.iconPath = new vscode.ThemeIcon('issues');
+        }
+    }
+}
+
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "github-issues-in-sidebar" is now active!');
     
@@ -177,7 +224,69 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    context.subscriptions.push(setTokenCommand, selectRepositoryCommand, refreshCommand, diagnoseCommand);
+    const closeIssueCommand = vscode.commands.registerCommand('githubIssues.closeIssue', async (issueItem: IssueItem) => {
+        if (!issueItem || issueItem.itemType !== 'issue' || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
+            vscode.window.showErrorMessage('Cannot close issue. Invalid item selected.');
+            return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to close issue #${issueItem.issueNumber}?`,
+            { modal: true },
+            'Yes, close issue'
+        );
+
+        if (confirm !== 'Yes, close issue') {
+            return;
+        }
+
+        const octokit = new Octokit({ auth: vscode.workspace.getConfiguration('githubIssues').get<string>('authToken') });
+
+        try {
+            await octokit.issues.update({
+                owner: issueItem.owner,
+                repo: issueItem.repo,
+                issue_number: issueItem.issueNumber,
+                state: 'closed'
+            });
+            vscode.window.showInformationMessage(`Successfully closed issue #${issueItem.issueNumber}.`);
+            issueProvider.refresh();
+        } catch (e: any) {
+            vscode.window.showErrorMessage(`Failed to close issue: ${e.message}`);
+        }
+    });
+
+    const addCommentCommand = vscode.commands.registerCommand('githubIssues.addComment', async (issueItem: IssueItem) => {
+        if (!issueItem || issueItem.itemType !== 'issue' || !issueItem.issueNumber || !issueItem.owner || !issueItem.repo) {
+            vscode.window.showErrorMessage('Cannot comment on issue. Invalid item selected.');
+            return;
+        }
+        
+        const comment = await vscode.window.showInputBox({
+            prompt: `Enter your comment for issue #${issueItem.issueNumber}`,
+            placeHolder: 'Your comment here... (Markdown is supported)'
+        });
+
+        if (!comment) {
+            return;
+        }
+
+        const octokit = new Octokit({ auth: vscode.workspace.getConfiguration('githubIssues').get<string>('authToken') });
+
+        try {
+            await octokit.issues.createComment({
+                owner: issueItem.owner,
+                repo: issueItem.repo,
+                issue_number: issueItem.issueNumber,
+                body: comment
+            });
+            vscode.window.showInformationMessage(`Successfully commented on issue #${issueItem.issueNumber}.`);
+        } catch (e: any) {
+            vscode.window.showErrorMessage(`Failed to add comment: ${e.message}`);
+        }
+    });
+
+    context.subscriptions.push(setTokenCommand, selectRepositoryCommand, refreshCommand, diagnoseCommand, closeIssueCommand, addCommentCommand);
 
     // 設定が変更されたらビューをリフレッシュする
     vscode.workspace.onDidChangeConfiguration(event => {
@@ -185,25 +294,6 @@ export function activate(context: vscode.ExtensionContext) {
             issueProvider.refresh();
         }
     });
-}
-
-class IssueItem extends vscode.TreeItem {
-    constructor(
-        public readonly label: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly command?: vscode.Command,
-        public readonly issueUrl?: string
-    ) {
-        super(label, collapsibleState);
-        // issueUrlがあれば、それを開くコマンドをデフォルトで設定する
-        if (issueUrl) {
-            this.command = {
-                command: 'vscode.open',
-                title: 'Open Issue',
-                arguments: [vscode.Uri.parse(issueUrl)]
-            };
-        }
-    }
 }
 
 class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
@@ -220,6 +310,12 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
     }
 
     async getChildren(element?: IssueItem): Promise<IssueItem[]> {
+        // もし`element`があれば、それは親イシューってことだから、そのサブタスクを返すよ
+        if (element) {
+            return Promise.resolve(element.subtasks);
+        }
+
+        // `element`がなければ、一番上の階層のイシューを取得しにいくよ
         const config = vscode.workspace.getConfiguration('githubIssues');
         const authToken = config.get<string>('authToken');
         const repoOwner = config.get<string>('repoOwner');
@@ -228,6 +324,7 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
         if (!authToken) {
             const setTokenItem = new IssueItem(
                 'Set GitHub Token', 
+                'info',
                 vscode.TreeItemCollapsibleState.None,
                 {
                     command: 'githubIssues.setToken',
@@ -240,6 +337,7 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
         if (!repoOwner || !repoName) {
             const selectRepoItem = new IssueItem(
                 'Select Repository to show issues', 
+                'info',
                 vscode.TreeItemCollapsibleState.None,
                 {
                     command: 'githubIssues.selectRepository',
@@ -259,16 +357,28 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
             });
 
             if (issues.data.length === 0) {
-                return [new IssueItem('No open issues found.', vscode.TreeItemCollapsibleState.None)];
+                return [new IssueItem('No open issues found.', 'info', vscode.TreeItemCollapsibleState.None)];
             }
 
+            // APIから受け取ったイシューを、画面に表示する`IssueItem`に変換するよ
             return issues.data.map(issue => {
-                return new IssueItem(
+                // イシューの本文（body）からサブタスクを抜き出すんだ
+                const subtasks = this.parseSubtasks(issue.body || '');
+
+                const issueItem = new IssueItem(
                     `#${issue.number}: ${issue.title}`,
-                    vscode.TreeItemCollapsibleState.None,
-                    undefined, // commandをissueUrlのデフォルトで上書きするのでundefined
-                    issue.html_url
+                    'issue',
+                    // サブタスクがあれば、フォルダみたいに開けられるようにするよ
+                    subtasks.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+                    undefined,
+                    issue.html_url,
+                    { owner: repoOwner, repo: repoName, issueNumber: issue.number }
                 );
+                // 見つけたサブタスクを、親イシューの中に保存しておくんだ
+                issueItem.subtasks = subtasks;
+                issueItem.tooltip = `[${repoOwner}/${repoName}] #${issue.number}\n\n${issue.title}`;
+                
+                return issueItem;
             });
         } catch (error: any) {
             console.error(error);
@@ -276,6 +386,7 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
             if (error.status === 401) {
                  const setTokenItem = new IssueItem(
                     'Authentication failed. Set new Token?', 
+                    'info',
                     vscode.TreeItemCollapsibleState.None,
                     {
                         command: 'githubIssues.setToken',
@@ -285,8 +396,29 @@ class IssueProvider implements vscode.TreeDataProvider<IssueItem> {
                 return [setTokenItem];
             }
             vscode.window.showErrorMessage('Failed to fetch issues from GitHub.');
-            return [new IssueItem('Error fetching issues. Check logs for details.', vscode.TreeItemCollapsibleState.None)];
+            return [new IssueItem('Error fetching issues. Check logs for details.', 'info', vscode.TreeItemCollapsibleState.None)];
         }
+    }
+
+    /**
+     * イシューの本文から、GitHubのタスクリスト（- [ ] や - [x]）を正規表現で探し出して、
+     * IssueItemの配列として返すヘルパー関数だよ。
+     */
+    private parseSubtasks(body: string): IssueItem[] {
+        const subtasks: IssueItem[] = [];
+        const taskRegex = /-\s\[( |x)\]\s(.*)/g;
+        let match;
+        while ((match = taskRegex.exec(body)) !== null) {
+            const isCompleted = match[1] === 'x';
+            const label = match[2].trim();
+            
+            const subtaskItem = new IssueItem(label, 'subtask', vscode.TreeItemCollapsibleState.None);
+            subtaskItem.iconPath = new vscode.ThemeIcon(isCompleted ? 'check' : 'circle-large-outline');
+            subtaskItem.description = isCompleted ? "Completed" : "";
+            
+            subtasks.push(subtaskItem);
+        }
+        return subtasks;
     }
 }
 
