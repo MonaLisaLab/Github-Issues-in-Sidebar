@@ -27,19 +27,23 @@
         "commands": [
             {
                 "command": "githubIssues.setToken",
-                "title": "Set GitHub Personal Access Token"
+                "title": "Set GitHub Personal Access Token",
+                "icon": "$(key)"
             },
             {
                 "command": "githubIssues.selectRepository",
-                "title": "Select Repository"
+                "title": "Select Repository",
+                "icon": "$(pencil)"
             },
             {
                 "command": "githubIssues.refresh",
-                "title": "Refresh"
+                "title": "Refresh",
+                "icon": "$(refresh)"
             },
             {
                 "command": "githubIssues.diagnose",
-                "title": "Run Connection Diagnostics"
+                "title": "Run Connection Diagnostics",
+                "icon": "$(beaker)"
             }
         ],
         "menus": {
@@ -47,20 +51,22 @@
                 {
                     "command": "githubIssues.selectRepository",
                     "when": "view == githubIssues",
-                    "group": "navigation",
-                    "icon": "$(pencil)"
+                    "group": "navigation"
                 },
                 {
                     "command": "githubIssues.refresh",
                     "when": "view == githubIssues",
-                    "group": "navigation",
-                    "icon": "$(refresh)"
+                    "group": "navigation"
                 },
                 {
                     "command": "githubIssues.setToken",
                     "when": "view == githubIssues",
-                    "group": "navigation",
-                    "icon": "$(key)"
+                    "group": "navigation"
+                },
+                {
+                    "command": "githubIssues.diagnose",
+                    "when": "view == githubIssues",
+                    "group": "navigation"
                 }
             ]
         },
