@@ -3,6 +3,7 @@
     "displayName": "Github Issues in Sidebar",
     "description": "A VSCode extension to view GitHub issues in the sidebar.",
     "version": "0.0.1",
+    "license": "MIT",
     "publisher": "t-myk",
     "icon": "resources/logo.png",
     "engines": {
