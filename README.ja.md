@@ -2,7 +2,7 @@
 
 VSCodeのサイドバーで、直接GitHubのイシューを閲覧・管理するための拡張機能です。
 
-![Github Issues](./resources/GithubIssues.png)
+![Github Issues](https://raw.githubusercontent.com/MonaLisaLab/Github-Issues-in-Sidebar/main/resources/GithubIssues.png)
 
 [English Version](./README.md)
 

@@ -2,7 +2,7 @@
 
 A VSCode extension to view and manage GitHub issues directly in your sidebar.
 
-![Github Issues](./resources/GithubIssues.png)
+![Github Issues](https://raw.githubusercontent.com/MonaLisaLab/Github-Issues-in-Sidebar/main/resources/GithubIssues.png)
 
 [日本語版はこちら](./README.ja.md)
 
